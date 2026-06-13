@@ -22,7 +22,8 @@ interface DBStructure {
 }
 
 const DEFAULT_AD_SETTINGS: AdSettings = {
-  headerCode: `<!-- ThunderHost Site Verification Header -->\n<meta name="thunderhost-verification" content="site-verified-123456">`,
+  globalHeaderCode: `<!-- ThunderHost Site Verification Header -->\n<meta name="thunderhost-verification" content="site-verified-123456">`,
+  adsHeaderCode: ``,
   banner728x90: `<div style="background: radial-gradient(circle, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; width: 728px; height: 90px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-family: sans-serif; color: #94a3b8; box-sizing: border-box; overflow: hidden; padding: 10px; margin: 0 auto;">\n  <span style="font-weight: 800; font-size: 10px; text-transform: uppercase; color: #3b82f6; margin-bottom: 2px; letter-spacing: 0.05em; display: block;">Sponsor Advertisement (Leaderboard 728x90)</span>\n  <span style="font-size: 14px; font-weight: bold; color: #ffffff; display: block;">Host Your Minecraft Server on ThunderHost!</span>\n  <span style="font-size: 11px; color: #64748b; margin-top: 4px; display: block;">Free Slot • 4GB RAM • 100% CPU Ryzen Server</span>\n</div>`,
   banner300x250: `<div style="background: radial-gradient(circle, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; width: 300px; height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-family: sans-serif; color: #94a3b8; box-sizing: border-box; overflow: hidden; padding: 20px; margin: 0 auto;">\n  <span style="font-weight: 800; font-size: 10px; text-transform: uppercase; color: #3b82f6; margin-bottom: 8px; letter-spacing: 0.05em; display: block;">Sponsor ad (Square 300x250)</span>\n  <span style="font-size: 16px; font-weight: bold; color: #ffffff; line-height: 1.3; display: block;">Need High Performance MC Slots?</span>\n  <p style="font-size: 12px; color: #94a3b8; margin: 8px 0 12px 0;">Level up your gameplay with zero lag and full FTP files configuration access.</p>\n  <button style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer; display: inline-block;">Deploy Now</button>\n</div>`,
   banner320x50: `<div style="background: radial-gradient(circle, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; width: 320px; height: 50px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; font-family: sans-serif; color: #94a3b8; box-sizing: border-box; overflow: hidden; padding: 5px; margin: 0 auto;">\n  <span style="font-weight: 800; font-size: 9px; text-transform: uppercase; color: #3b82f6; letter-spacing: 0.05em; display: block;">Sponsor (Mobile 320x50)</span>\n  <span style="font-size: 11px; font-weight: bold; color: #ffffff; display: block;">ThunderHost • 100% Free Hosting</span>\n</div>`,
@@ -104,6 +105,21 @@ class JSONDatabase {
           shortenerCompletions: parsed.shortenerCompletions || [],
           shortenerTokens: parsed.shortenerTokens || {}
         };
+
+        // Smoothly migrate old single headerCode / headerCodeBannerOnly settings to global/ads split structure
+        if (parsed.adSettings) {
+          const old = parsed.adSettings as any;
+          if (old.headerCode !== undefined && old.globalHeaderCode === undefined) {
+            if (old.headerCodeBannerOnly) {
+              this.data.adSettings.adsHeaderCode = old.headerCode || "";
+              this.data.adSettings.globalHeaderCode = "";
+            } else {
+              this.data.adSettings.globalHeaderCode = old.headerCode || "";
+              this.data.adSettings.adsHeaderCode = "";
+            }
+            this.save();
+          }
+        }
 
         // Guarantee specific user-requested Pterodactyl active configuration is integrated
         if (

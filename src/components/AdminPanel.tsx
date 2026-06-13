@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Shield, Users, Server, Settings, Video, Activity, Ban, CheckCircle, Trash2, Key, HelpCircle, Save, Plus, ArrowLeft } from "lucide-react";
+import { Shield, Users, Server, Settings, Video, Activity, Ban, CheckCircle, Trash2, Key, HelpCircle, Save, Plus, ArrowLeft, Coins } from "lucide-react";
 import { api } from "../api";
 import { MCServer, PterodactylSettings, SponsoredAd, SystemStats, User, UrlShortener } from "../types";
 
@@ -54,7 +54,8 @@ export default function AdminPanel({
   const [newAdUrl, setNewAdUrl] = useState("");
 
   // Ad Network Banner codes states
-  const [adHeaderCode, setAdHeaderCode] = useState("");
+  const [adGlobalHeaderCode, setAdGlobalHeaderCode] = useState("");
+  const [adAdsHeaderCode, setAdAdsHeaderCode] = useState("");
   const [adBanner728x90, setAdBanner728x90] = useState("");
   const [adBanner300x250, setAdBanner300x250] = useState("");
   const [adBanner320x50, setAdBanner320x50] = useState("");
@@ -85,7 +86,8 @@ export default function AdminPanel({
 
       try {
         const fetchedAdSettings = await api.getAdminAdSettings();
-        setAdHeaderCode(fetchedAdSettings.headerCode || "");
+        setAdGlobalHeaderCode(fetchedAdSettings.globalHeaderCode || "");
+        setAdAdsHeaderCode(fetchedAdSettings.adsHeaderCode || "");
         setAdBanner728x90(fetchedAdSettings.banner728x90 || "");
         setAdBanner300x250(fetchedAdSettings.banner300x250 || "");
         setAdBanner320x50(fetchedAdSettings.banner320x50 || "");
@@ -141,7 +143,8 @@ export default function AdminPanel({
     e.preventDefault();
     try {
       const res = await api.saveAdminAdSettings({
-        headerCode: adHeaderCode,
+        globalHeaderCode: adGlobalHeaderCode,
+        adsHeaderCode: adAdsHeaderCode,
         banner728x90: adBanner728x90,
         banner300x250: adBanner300x250,
         banner320x50: adBanner320x50,
@@ -646,21 +649,40 @@ export default function AdminPanel({
               </div>
 
               <form onSubmit={handleSaveAdSettings} className="space-y-6">
-                <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2">
-                  <label className="block text-xs text-slate-300 font-bold flex items-center space-x-1.5 uppercase tracking-wide">
-                    <Shield className="h-4 w-4 text-emerald-400" />
-                    <span>Global Head Verification Code</span>
-                  </label>
-                  <p className="text-[10px] text-slate-550 leading-relaxed">
-                    This code gets injected directly into the HTML <code className="text-blue-400">&lt;head&gt;</code> of the whole website. Paste verification tags, meta tags, or global site tracking tags here.
-                  </p>
-                  <textarea
-                    rows={4}
-                    placeholder="<!-- Copy paste validation HTML tag here -->&#10;<meta name='google-site-verification' content='xxxxx' />"
-                    value={adHeaderCode}
-                    onChange={(e) => setAdHeaderCode(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl p-3 text-xs text-white focus:outline-none font-mono"
-                  />
+                <div className="space-y-4">
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2">
+                    <label className="block text-xs text-slate-300 font-bold flex items-center space-x-1.5 uppercase tracking-wide">
+                      <Shield className="h-4 w-4 text-emerald-400" />
+                      <span>Global Head Injection Code</span>
+                    </label>
+                    <p className="text-[10px] text-slate-550 leading-relaxed font-sans">
+                      This code is injected into the HTML <code className="text-blue-400">&lt;head&gt;</code> globally on every page block (e.g. site ownership verification tags, Google Search Console, or global trackers).
+                    </p>
+                    <textarea
+                      rows={3}
+                      placeholder="<!-- Paste global validation / domain verification tags here -->&#10;<meta name='google-site-verification' content='...' />"
+                      value={adGlobalHeaderCode}
+                      onChange={(e) => setAdGlobalHeaderCode(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl p-3 text-xs text-white focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-2">
+                    <label className="block text-xs text-slate-300 font-bold flex items-center space-x-1.5 uppercase tracking-wide">
+                      <Coins className="h-4 w-4 text-amber-400" />
+                      <span>Banner Ads Page Head Injection Code</span>
+                    </label>
+                    <p className="text-[10px] text-slate-550 leading-relaxed font-sans">
+                      This code gets injected into the HTML <code className="text-blue-400">&lt;head&gt;</code> <b>only</b> when an active user navigates to the <b>Earn Coins tab</b> (e.g. PropellerAds, Popunder codes, or specific tracking tags for banner-only earning mechanics).
+                    </p>
+                    <textarea
+                      rows={3}
+                      placeholder="<!-- Paste head codes for the banner ads page only -->&#10;<script type='text/javascript' src='...'></script>"
+                      value={adAdsHeaderCode}
+                      onChange={(e) => setAdAdsHeaderCode(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl p-3 text-xs text-white focus:outline-none font-mono"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-4">

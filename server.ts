@@ -823,9 +823,10 @@ app.get("/api/admin/ad-settings", verifyAdminPrivileges, (req, res) => {
 });
 
 app.post("/api/admin/ad-settings", verifyAdminPrivileges, (req, res) => {
-  const { headerCode, banner728x90, banner300x250, banner320x50, banner160x600 } = req.body;
+  const { globalHeaderCode, adsHeaderCode, banner728x90, banner300x250, banner320x50, banner160x600 } = req.body;
   const nextAdSettings = {
-    headerCode: String(headerCode !== undefined ? headerCode : ""),
+    globalHeaderCode: String(globalHeaderCode !== undefined ? globalHeaderCode : ""),
+    adsHeaderCode: String(adsHeaderCode !== undefined ? adsHeaderCode : ""),
     banner728x90: String(banner728x90 !== undefined ? banner728x90 : ""),
     banner300x250: String(banner300x250 !== undefined ? banner300x250 : ""),
     banner320x50: String(banner320x50 !== undefined ? banner320x50 : ""),
@@ -836,7 +837,11 @@ app.post("/api/admin/ad-settings", verifyAdminPrivileges, (req, res) => {
 });
 
 app.get("/api/ads/header", (req, res) => {
-  res.json({ headerCode: db.getAdSettings().headerCode });
+  const s = db.getAdSettings();
+  res.json({ 
+    globalHeaderCode: s.globalHeaderCode || "",
+    adsHeaderCode: s.adsHeaderCode || ""
+  });
 });
 
 app.get("/api/ads/banners", (req, res) => {
@@ -1217,8 +1222,8 @@ async function serveApp() {
         let htmlContent = fs.readFileSync(indexPath, "utf-8");
         try {
           const adSet = db.getAdSettings();
-          if (adSet && adSet.headerCode) {
-            htmlContent = htmlContent.replace("</head>", `${adSet.headerCode}</head>`);
+          if (adSet && adSet.globalHeaderCode) {
+            htmlContent = htmlContent.replace("</head>", `${adSet.globalHeaderCode}</head>`);
           }
         } catch (e) {
           console.error("Failed to inject header code:", e);

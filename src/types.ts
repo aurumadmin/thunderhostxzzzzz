@@ -44,7 +44,8 @@ export interface PterodactylSettings {
 }
 
 export interface AdSettings {
-  headerCode: string;
+  globalHeaderCode: string;
+  adsHeaderCode: string;
   banner728x90: string;
   banner300x250: string;
   banner320x50: string;

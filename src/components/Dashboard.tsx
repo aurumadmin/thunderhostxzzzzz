@@ -191,6 +191,64 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
     return () => clearInterval(interval);
   }, []);
 
+  // Dynamic ad verification/tracking head code injector for the banner ads (Earn tab) page only
+  useEffect(() => {
+    let injectedElements: HTMLElement[] = [];
+    
+    const loadAndInjectAdHeader = async () => {
+      try {
+        const res = await fetch("/api/ads/header");
+        const data = await res.json();
+        // If adsHeaderCode exists, dynamically inject it on the earn tab.
+        if (activeTab === "earn" && data.adsHeaderCode) {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(`<div>${data.adsHeaderCode}</div>`, "text/html");
+          const children = Array.from(doc.body.firstChild?.childNodes || []);
+          
+          children.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as HTMLElement;
+              let newEl: HTMLElement;
+              if (el.tagName === "SCRIPT") {
+                newEl = document.createElement("script");
+                Array.from(el.attributes).forEach(attr => newEl.setAttribute(attr.name, attr.value));
+                newEl.innerHTML = el.innerHTML;
+              } else if (el.tagName === "STYLE") {
+                newEl = document.createElement("style");
+                newEl.innerHTML = el.innerHTML;
+              } else if (el.tagName === "META") {
+                newEl = document.createElement("meta");
+                Array.from(el.attributes).forEach(attr => newEl.setAttribute(attr.name, attr.value));
+              } else if (el.tagName === "LINK") {
+                newEl = document.createElement("link");
+                Array.from(el.attributes).forEach(attr => newEl.setAttribute(attr.name, attr.value));
+              } else {
+                newEl = document.createElement(el.tagName.toLowerCase());
+                Array.from(el.attributes).forEach(attr => newEl.setAttribute(attr.name, attr.value));
+                newEl.innerHTML = el.innerHTML;
+              }
+              document.head.appendChild(newEl);
+              injectedElements.push(newEl);
+            }
+          });
+        }
+      } catch (e) {
+        console.error("Failed to inject banner-ads head code dynamically:", e);
+      }
+    };
+
+    loadAndInjectAdHeader();
+
+    return () => {
+      injectedElements.forEach(el => {
+        if (el && el.parentNode) {
+          el.parentNode.removeChild(el);
+        }
+      });
+      injectedElements = [];
+    };
+  }, [activeTab]);
+
   // Real-time server resource monitoring loop
   useEffect(() => {
     if (servers.length === 0) return;
