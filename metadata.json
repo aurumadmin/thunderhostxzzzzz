@@ -1,0 +1,6 @@
+{
+  "name": "ThunderHost",
+  "description": "High-performance free Minecraft server hosting where users earn Thunder Coins by viewing ads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
