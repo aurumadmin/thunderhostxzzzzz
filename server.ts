@@ -78,6 +78,18 @@ app.post("/api/auth/register", (req, res) => {
     return;
   }
 
+  const rawIp = req.headers["x-forwarded-for"] as string || req.headers["x-real-ip"] as string || req.socket.remoteAddress || "";
+  const ip = rawIp.split(",")[0].trim();
+
+  // Restrict creating multiple accounts from a single IP (bypass loopback/localhost)
+  if (ip && ip !== "127.0.0.1" && ip !== "::1" && ip !== "localhost") {
+    const isIpRegistered = db.listUsers().some(u => u.registrationIp === ip);
+    if (isIpRegistered) {
+      res.status(400).json({ message: "An account has already been registered from this IP address to prevent multiple accounts." });
+      return;
+    }
+  }
+
   // Pre-load with 1.0 Thunder Coins to allow instant first-server setup trial!
   const isDefaultAdmin = ["teamthunderofficialyt@gmail.com", "freefiregtamcpe@gmail.com"].includes(email.toLowerCase());
 
@@ -90,7 +102,8 @@ app.post("/api/auth/register", (req, res) => {
     role: isDefaultAdmin ? "admin" : "user",
     claimsToday: 0,
     lastClaimDate: new Date().toISOString().split("T")[0],
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    registrationIp: ip || undefined
   };
 
   db.createUser(newUser);

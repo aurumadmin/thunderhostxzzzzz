@@ -473,6 +473,11 @@ export default function AdminPanel({
                         <td className="p-4">
                           <span className="font-bold text-white block">{currUser.username}</span>
                           <span className="text-slate-500 text-xs mt-0.5 block">{currUser.email}</span>
+                          {currUser.registrationIp ? (
+                            <span className="text-blue-400 font-mono text-[10px] mt-1 block">IP: {currUser.registrationIp}</span>
+                          ) : (
+                            <span className="text-slate-600 font-mono text-[10px] mt-1 block">IP: Unknown</span>
+                          )}
                         </td>
                         <td className="p-4">
                           {currUser.role === "admin" ? (

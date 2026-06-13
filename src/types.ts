@@ -8,6 +8,7 @@ export interface User {
   claimsToday: number;
   lastClaimDate: string; // YYYY-MM-DD
   createdAt: string;
+  registrationIp?: string;
 }
 
 export interface MCServer {
