@@ -795,6 +795,110 @@ function verifyAdminPrivileges(req: express.Request, res: express.Response, next
   });
 }
 
+app.post("/api/admin/servers/create", verifyAdminPrivileges, async (req, res) => {
+  const { name, ownerEmail, serverType, botType, planId, cpu, ram, disk, durationHours } = req.body;
+
+  if (!name || name.trim().length === 0) {
+    res.status(400).json({ message: "Please supply a server name." });
+    return;
+  }
+
+  if (!ownerEmail || ownerEmail.trim().length === 0) {
+    res.status(400).json({ message: "Please supply a target owner email." });
+    return;
+  }
+
+  const targetUser = db.getUser(ownerEmail.trim().toLowerCase());
+  if (!targetUser) {
+    res.status(400).json({ message: "The specified target user does not exist." });
+    return;
+  }
+
+  const isBot = serverType === "bot";
+  const pId = planId ? parseInt(planId) : 1;
+  const hours = durationHours ? parseFloat(durationHours) : (isBot ? 72 : 24);
+
+  let finalCpu = cpu ? parseInt(cpu) : (isBot ? 25 : 100);
+  let finalRam = ram ? parseInt(ram) : (isBot ? 1024 : 4096);
+  let finalDisk = disk ? parseInt(disk) : (isBot ? 2048 : 10240);
+
+  if (!cpu || !ram || !disk) {
+    if (isBot) {
+      if (pId === 2) {
+        finalCpu = 50; finalRam = 2048; finalDisk = 4096;
+      } else if (pId === 3) {
+        finalCpu = 75; finalRam = 3072; finalDisk = 6144;
+      } else if (pId === 4) {
+        finalCpu = 100; finalRam = 4096; finalDisk = 8192;
+      }
+    } else {
+      if (pId === 2) {
+        finalCpu = 200; finalRam = 8192; finalDisk = 20480;
+      } else if (pId === 3) {
+        finalCpu = 300; finalRam = 12288; finalDisk = 30720;
+      }
+    }
+  }
+
+  const settings = db.getSettings();
+
+  const initialServer: MCServer = {
+    id: "th_" + Math.random().toString(36).substring(2, 9),
+    name: name.trim(),
+    ownerEmail: targetUser.email,
+    serverType: isBot ? "bot" : "minecraft",
+    botType: isBot ? (botType === "python" ? "python" : "nodejs") : undefined,
+    planId: pId,
+    cpu: finalCpu,
+    ram: finalRam,
+    disk: finalDisk,
+    status: "creating",
+    expiresAt: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+    suspendedAt: null,
+    pterodactylId: null,
+    ipAddress: "connecting...",
+    port: isBot ? 3000 : 25565,
+    createdAt: new Date().toISOString()
+  };
+
+  db.createServer(initialServer);
+
+  try {
+    const deployment = await createPteroServer(initialServer, settings);
+    db.updateServer(initialServer.id, s => {
+      s.pterodactylId = deployment.pterodactylId;
+      s.ipAddress = deployment.ipAddress;
+      s.port = deployment.port;
+      s.pteroUsername = deployment.pteroUsername;
+      s.pteroPassword = deployment.pteroPassword;
+      s.status = "running";
+    });
+
+    db.addNotification({
+      id: Math.random().toString(36).substring(7),
+      userEmail: targetUser.email,
+      title: isBot ? "⚡ Custom Bot Hosting Provisioned" : "⚡ Custom server provisioned",
+      message: `An administrator has custom-provisioned a server "${initialServer.name}" for your account. Duration: ${hours} hours! Specifications: ${finalRam / 1024}GB RAM / ${finalCpu}% CPU.`,
+      type: "success",
+      isRead: false,
+      createdAt: new Date().toISOString()
+    });
+
+    const freshCreated = db.getServer(initialServer.id);
+    res.json({
+      message: "Server created successfully by Admin",
+      server: freshCreated ? {
+        ...freshCreated,
+        panelUrl: settings.panelUrl || "https://panel.thunderhost.club"
+      } : null
+    });
+  } catch (error: any) {
+    console.error("Admin server deployment failed:", error);
+    db.deleteServer(initialServer.id);
+    res.status(500).json({ message: "Pterodactyl panel deployment failed: " + error.message });
+  }
+});
+
 app.get("/api/admin/users", verifyAdminPrivileges, (req, res) => {
   const users = db.listUsers().map(u => ({
     email: u.email,

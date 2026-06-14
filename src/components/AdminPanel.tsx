@@ -61,6 +61,46 @@ export default function AdminPanel({
   const [adBanner320x50, setAdBanner320x50] = useState("");
   const [adBanner160x600, setAdBanner160x600] = useState("");
 
+  // States for Admin Server Creator form
+  const [showCreateServerForm, setShowCreateServerForm] = useState(false);
+  const [adminSrvName, setAdminSrvName] = useState("");
+  const [adminSrvOwnerEmail, setAdminSrvOwnerEmail] = useState("");
+  const [adminSrvType, setAdminSrvType] = useState<"minecraft" | "bot">("minecraft");
+  const [adminSrvBotType, setAdminSrvBotType] = useState<"nodejs" | "python">("nodejs");
+  const [adminSrvPlanId, setAdminSrvPlanId] = useState("1");
+  const [adminSrvCpu, setAdminSrvCpu] = useState("100");
+  const [adminSrvRam, setAdminSrvRam] = useState("4096");
+  const [adminSrvDisk, setAdminSrvDisk] = useState("10240");
+  const [adminSrvDurationHours, setAdminSrvDurationHours] = useState("24"); // Default 24 hours
+  const [isSubmittingAdminSrv, setIsSubmittingAdminSrv] = useState(false);
+
+  useEffect(() => {
+    const isBot = adminSrvType === "bot";
+    const pId = parseInt(adminSrvPlanId);
+    if (isBot) {
+      if (pId === 1) {
+        setAdminSrvCpu("25"); setAdminSrvRam("1024"); setAdminSrvDisk("2048");
+      } else if (pId === 2) {
+        setAdminSrvCpu("50"); setAdminSrvRam("2048"); setAdminSrvDisk("4096");
+      } else if (pId === 3) {
+        setAdminSrvCpu("75"); setAdminSrvRam("3072"); setAdminSrvDisk("6144");
+      } else if (pId === 4) {
+        setAdminSrvCpu("100"); setAdminSrvRam("4096"); setAdminSrvDisk("8192");
+      }
+    } else {
+      if (pId === 1) {
+        setAdminSrvCpu("100"); setAdminSrvRam("4096"); setAdminSrvDisk("10240");
+      } else if (pId === 2) {
+        setAdminSrvCpu("200"); setAdminSrvRam("8192"); setAdminSrvDisk("20480");
+      } else if (pId === 3 || pId === 4) {
+        setAdminSrvCpu("300"); setAdminSrvRam("12288"); setAdminSrvDisk("30720");
+        if (pId === 4) {
+          setAdminSrvPlanId("3");
+        }
+      }
+    }
+  }, [adminSrvType, adminSrvPlanId]);
+
   const refreshAllAdminData = async () => {
     try {
       setLoading(true);
@@ -250,6 +290,45 @@ export default function AdminPanel({
     }
   };
 
+  const handleAdminCreateServer = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!adminSrvName.trim()) {
+      onServerNotification("Required check failed", "Server name is required.", "warning");
+      return;
+    }
+    if (!adminSrvOwnerEmail.trim()) {
+      onServerNotification("Required check failed", "Target user owner email is required.", "warning");
+      return;
+    }
+
+    try {
+      setIsSubmittingAdminSrv(true);
+      const res = await api.adminCreateServer({
+        name: adminSrvName.trim(),
+        ownerEmail: adminSrvOwnerEmail.trim(),
+        serverType: adminSrvType,
+        botType: adminSrvType === "bot" ? adminSrvBotType : undefined,
+        planId: parseInt(adminSrvPlanId),
+        cpu: parseInt(adminSrvCpu),
+        ram: parseInt(adminSrvRam),
+        disk: parseInt(adminSrvDisk),
+        durationHours: parseFloat(adminSrvDurationHours)
+      });
+      onServerNotification("Provisioning Initiated", res.message || "Custom Server deployed successfully for the specific user!", "success");
+      
+      // Reset form fields
+      setAdminSrvName("");
+      setAdminSrvOwnerEmail("");
+      setShowCreateServerForm(false);
+      
+      await refreshAllAdminData();
+    } catch (err: any) {
+      onServerNotification("Admin creation failed", err.message || "Failed to customize and allocate server.", "danger");
+    } finally {
+      setIsSubmittingAdminSrv(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-8">
       {/* Back button */}
@@ -360,7 +439,196 @@ export default function AdminPanel({
           
           {/* TAB 1: SERVERS TABLE LISTING (Screenshot 3 alignment) */}
           {activeTab === "servers" && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="space-y-6">
+              {/* Creator Card */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-black text-white flex items-center space-x-2">
+                      <Plus className="h-5 w-5 text-blue-500" />
+                      <span>Custom Server Allocation Engine (Admin Mode)</span>
+                    </h3>
+                    <p className="text-slate-400 text-xs mt-1">
+                      Instantly provision a bespoke Minecraft server or background bot process for any registered email on ThunderHost for a specified amount of time.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowCreateServerForm(!showCreateServerForm)}
+                    className="self-start sm:self-center bg-blue-600/10 border border-blue-500/30 text-blue-400 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap"
+                  >
+                    {showCreateServerForm ? "Hide Allocator Panel" : "Open Allocator Form"}
+                  </button>
+                </div>
+
+                {showCreateServerForm && (
+                  <form onSubmit={handleAdminCreateServer} className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 space-y-5 animate-in fade-in slide-in-from-top-4 duration-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {/* Name */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Server Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. survival-custom-slot"
+                          value={adminSrvName}
+                          onChange={(e) => setAdminSrvName(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none placeholder-slate-600"
+                        />
+                      </div>
+
+                      {/* Owner Email Selection */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Target Owner User</label>
+                        <select
+                          required
+                          value={adminSrvOwnerEmail}
+                          onChange={(e) => setAdminSrvOwnerEmail(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none"
+                        >
+                          <option value="">-- Choose User --</option>
+                          {usersList.map((usr) => (
+                            <option key={usr.email} value={usr.email}>
+                              {usr.username} ({usr.email})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Duration in Hours */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Allocation Duration Time</label>
+                        <select
+                          value={adminSrvDurationHours}
+                          onChange={(e) => setAdminSrvDurationHours(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none"
+                        >
+                          <option value="1">1 Hour</option>
+                          <option value="6">6 Hours</option>
+                          <option value="12">12 Hours</option>
+                          <option value="24">24 Hours (1 Day)</option>
+                          <option value="72">72 Hours (3 Days)</option>
+                          <option value="168">168 Hours (7 Days)</option>
+                          <option value="720">720 Hours (30 Days)</option>
+                          <option value="8760">8760 Hours (365 Days / 1 Year)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                      {/* Server Type */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Server Type</label>
+                        <select
+                          value={adminSrvType}
+                          onChange={(e) => setAdminSrvType(e.target.value as "minecraft" | "bot")}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none"
+                        >
+                          <option value="minecraft">Minecraft Server</option>
+                          <option value="bot">Discord Bot Node</option>
+                        </select>
+                      </div>
+
+                      {/* Bot Type selection (conditional) */}
+                      {adminSrvType === "bot" ? (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-300 block">Script Interpreter</label>
+                          <select
+                            value={adminSrvBotType}
+                            onChange={(e) => setAdminSrvBotType(e.target.value as "nodejs" | "python")}
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none"
+                          >
+                            <option value="nodejs">Node.js (v18 Yolks)</option>
+                            <option value="python">Python (v3.10 Yolks)</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="hidden lg:block"></div>
+                      )}
+
+                      {/* Plan / Tier Selection */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Plan Tier Level</label>
+                        <select
+                          value={adminSrvPlanId}
+                          onChange={(e) => setAdminSrvPlanId(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none"
+                        >
+                          <option value="1">Tier 1 (Starter Spec)</option>
+                          <option value="2">Tier 2 (Pro Upgraded)</option>
+                          <option value="3">Tier 3 (Mega Upgraded)</option>
+                          {adminSrvType === "bot" && (
+                            <option value="4">Tier 4 (Max Bot Turbo)</option>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Custom CPU */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Custom CPU Limit (%)</label>
+                        <input
+                          type="number"
+                          value={adminSrvCpu}
+                          onChange={(e) => setAdminSrvCpu(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* Custom RAM */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Custom RAM Limit (MB)</label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            value={adminSrvRam}
+                            onChange={(e) => setAdminSrvRam(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none"
+                          />
+                          <span className="text-slate-500 text-xs whitespace-nowrap">
+                            (= {(parseInt(adminSrvRam) / 1024).toFixed(1)} GB)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Custom Disk */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-slate-300 block">Custom Storage Disk (MB)</label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            value={adminSrvDisk}
+                            onChange={(e) => setAdminSrvDisk(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none"
+                          />
+                          <span className="text-slate-500 text-xs whitespace-nowrap">
+                            (= {(parseInt(adminSrvDisk) / 1024).toFixed(1)} GB)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingAdminSrv}
+                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/80 text-white font-bold py-3.5 rounded-xl text-xs flex items-center justify-center space-x-2 cursor-pointer shadow-md shadow-blue-500/20"
+                      >
+                        {isSubmittingAdminSrv ? (
+                          <span>Deploying container via Pterodactyl Link ...</span>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4" />
+                            <span>Authorize and Create Specific User Server Instance</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
               <div className="p-5 border-b border-slate-800">
                 <h3 className="text-md font-bold text-white uppercase tracking-wide">Allocated Server Deployments</h3>
               </div>
@@ -447,7 +715,8 @@ export default function AdminPanel({
                 </table>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
           {/* TAB 2: USERS LIST ACCOUNT SUSPENSION TOOL */}
           {activeTab === "users" && (

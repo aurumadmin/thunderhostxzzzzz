@@ -153,6 +153,23 @@ export const api = {
   },
 
   // --- Admin Methods ---
+  async adminCreateServer(payload: {
+    name: string;
+    ownerEmail: string;
+    serverType: "minecraft" | "bot";
+    botType?: "nodejs" | "python";
+    planId: number;
+    cpu: number;
+    ram: number;
+    disk: number;
+    durationHours: number;
+  }) {
+    return fetchJson<{ message: string; server: MCServer }>(`${API_BASE}/admin/servers/create`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+
   async getAdminUsers() {
     return fetchJson<any[]>(`${API_BASE}/admin/users`);
   },

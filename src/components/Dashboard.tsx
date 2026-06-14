@@ -48,49 +48,156 @@ function AdCodeRenderer({ html, sizeLabel }: { html: string; sizeLabel: string }
 }
 
 export async function detectAdBlocker(): Promise<boolean> {
-  // Test 1: Try to fetch a script that is blocked by almost all ad blockers
+  let detected = false;
+
+  // Track window variables for verification
+  (window as any).thunderHostAdsActive = undefined;
+  (window as any).thunderHostAdBannerActive = undefined;
+
+  // Test 1: DOM Cosmetic / Bait element check (checking display/visibility/element height)
+  try {
+    const baitClasses = [
+      "adsbox",
+      "ad-placement",
+      "adsbygoogle",
+      "ad_box",
+      "banner-ad",
+      "pub_300x250",
+      "ad-zone",
+      "sponsored-links-container",
+      "ad-placeholder",
+      "ad-unit"
+    ];
+
+    const testContainer = document.createElement("div");
+    testContainer.id = "th-ad-detection-container";
+    testContainer.setAttribute("style", "position: absolute; top: -1000px; left: -1000px; width: 1px; height: 1px; pointer-events: none; overflow: hidden;");
+    document.body.appendChild(testContainer);
+
+    const elementsToTest: HTMLDivElement[] = [];
+
+    baitClasses.forEach(className => {
+      const baitEl = document.createElement("div");
+      baitEl.className = className;
+      baitEl.setAttribute("style", "display: block !important; visibility: visible !important; width: 10px !important; height: 10px !important; position: relative;");
+      testContainer.appendChild(baitEl);
+      elementsToTest.push(baitEl);
+    });
+
+    // Short timeout to allow browser layout rendering & adblock selectors injection
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    for (const el of elementsToTest) {
+      const computed = window.getComputedStyle(el);
+      if (
+        el.offsetHeight === 0 ||
+        el.offsetWidth === 0 ||
+        computed.display === "none" ||
+        computed.visibility === "hidden"
+      ) {
+        detected = true;
+        break;
+      }
+    }
+
+    document.body.removeChild(testContainer);
+  } catch (e) {
+    console.error("DOM bait test error:", e);
+  }
+
+  if (detected) return true;
+
+  // Test 2: Network Script Fetch on relative known Ad Blocker EasyList paths on our own host
+  // Since these are on the host origin, adblockers do NOT serve mock surrogates for them; they block them outright!
+  const targetEasyListUrls = [
+    "/js/ads.js",
+    "/ads/ad-banner.js"
+  ];
+
+  for (const urlPath of targetEasyListUrls) {
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 1200);
+      
+      const response = await fetch(window.location.origin + urlPath, {
+        method: "GET",
+        headers: { "Cache-Control": "no-cache" },
+        signal: controller.signal
+      });
+      clearTimeout(id);
+
+      // If response is not OK (e.g. aborted, blocked, status doesn't equal 200)
+      if (!response.ok || response.status !== 200) {
+        detected = true;
+        break;
+      }
+    } catch (err) {
+      // Fetch aborted/blocked throws TypeError: Failed to fetch
+      detected = true;
+      break;
+    }
+  }
+
+  if (detected) return true;
+
+  // Test 3: Dynamic Script Tag Insertion check
+  // Actually loading the scripts onto the page to check if global variables get written
+  try {
+    const loadScript = (path: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = path;
+        script.type = "text/javascript";
+        script.async = true;
+        script.onload = () => {
+          try {
+            document.body.removeChild(script);
+          } catch (e) {}
+          resolve(true); // completed loading
+        };
+        script.onerror = () => {
+          try {
+            document.body.removeChild(script);
+          } catch (e) {}
+          resolve(false); // blocked or failed
+        };
+        document.body.appendChild(script);
+      });
+    };
+
+    const adsJsLoaded = await loadScript("/js/ads.js");
+    const bannerJsLoaded = await loadScript("/ads/ad-banner.js");
+
+    // Check both loading success and variable resolution
+    if (
+      !adsJsLoaded || 
+      !bannerJsLoaded ||
+      (window as any).thunderHostAdsActive !== true ||
+      (window as any).thunderHostAdBannerActive !== true
+    ) {
+      detected = true;
+    }
+  } catch (e) {
+    detected = true;
+  }
+
+  if (detected) return true;
+
+  // Test 4: External Google AdSense block check as final fallback
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-    await fetch("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js", {
-      method: "HEAD",
+    const id = setTimeout(() => controller.abort(), 1200);
+    const googleAdRes = await fetch("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js", {
+      method: "GET",
       mode: "no-cors",
-      cache: "no-store",
       signal: controller.signal
     });
     clearTimeout(id);
   } catch (err) {
-    return true; // network request blocked by adblock extension
+    detected = true;
   }
 
-  // Test 2: Inject a dummy ad div with common ad classes and check styles/dimensions
-  let isDOMBlocked = false;
-  try {
-    const testAd = document.createElement("div");
-    testAd.innerHTML = "&nbsp;";
-    testAd.className = "ads banner-ad ad-banner pub_300x250 pub_300x250m pub_728x90 text-ad textAd text_ad text_ads text-ads";
-    testAd.setAttribute("style", "position: absolute; top: -999px; left: -999px; width: 1px; height: 1px; pointer-events: none; opacity: 0;");
-    document.body.appendChild(testAd);
-    
-    // Small delay to ensure render tree styles calculation
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    if (
-      testAd.offsetHeight === 0 ||
-      testAd.offsetWidth === 0 ||
-      testAd.clientHeight === 0 ||
-      testAd.clientWidth === 0 ||
-      window.getComputedStyle(testAd).display === "none" ||
-      window.getComputedStyle(testAd).visibility === "hidden"
-    ) {
-      isDOMBlocked = true;
-    }
-    document.body.removeChild(testAd);
-  } catch (e) {
-    console.error("DOM ad-block test failed:", e);
-  }
-
-  return isDOMBlocked;
+  return detected;
 }
 
 interface DashboardProps {
@@ -98,6 +205,29 @@ interface DashboardProps {
   onRefreshUser: () => Promise<void>;
   onServerNotification: (title: string, message: string, type: "success" | "warning" | "danger" | "info") => void;
 }
+
+const getExpiryInfo = (expiresAt: string) => {
+  const diffMs = new Date(expiresAt).getTime() - Date.now();
+  const totalHours = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 65)));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+
+  let label = "";
+  if (totalHours <= 0) {
+    label = "Expired";
+  } else if (totalHours <= 25 && totalHours >= 23) {
+    label = "Expires in 24 Hours";
+  } else if (totalHours < 24) {
+    label = `Expires in ${totalHours} Hour${totalHours !== 1 ? 's' : ''}`;
+  } else {
+    label = `Expires in ${days} Day${days !== 1 ? 's' : ''}${hours > 0 ? ` ${hours}h` : ''}`;
+  }
+
+  // Under 3 days (72 hours) is displayed in striking red. Otherwise blue/green.
+  const isRed = totalHours < 72;
+
+  return { label, isRed };
+};
 
 export default function Dashboard({ user, onRefreshUser, onServerNotification }: DashboardProps) {
   const [servers, setServers] = useState<MCServer[]>([]);
@@ -108,6 +238,13 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
   const [botLang, setBotLang] = useState<"nodejs" | "python">("nodejs");
   const [upgradeServerId, setUpgradeServerId] = useState<string | null>(null);
   const [renewServerId, setRenewServerId] = useState<string | null>(null);
+  const [confirmExtendServerId, setConfirmExtendServerId] = useState<string | null>(null);
+  const [confirmUpgradePayload, setConfirmUpgradePayload] = useState<{
+    serverId: string;
+    targetPlanId: number;
+    planName: string;
+    coinCost: number;
+  } | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [activeTab, setActiveTabState] = useState<"servers" | "earn" | "shorteners">(() => {
     try {
@@ -527,6 +664,73 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
     }
   };
 
+  if (adBlockDetected) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-16 animate-fade-in select-none">
+        <div className="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 md:p-12 text-center relative overflow-hidden shadow-2xl">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 blur-[60px] rounded-full pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-32 h-32 bg-amber-500/5 blur-[60px] rounded-full pointer-events-none" />
+          
+          <div className="space-y-6">
+            <div className="bg-red-500/10 h-24 w-24 rounded-full flex items-center justify-center mx-auto text-red-500 border border-red-500/20 shadow-inner relative">
+              <div className="absolute inset-0 bg-red-500/5 rounded-full animate-ping opacity-60 pointer-events-none" />
+              <AlertTriangle className="h-10 w-10 text-red-505" />
+            </div>
+
+            <div className="space-y-3">
+              <span className="text-[10px] text-amber-500 font-extrabold uppercase tracking-widest block font-mono">DASHBOARD SUSPENDED</span>
+              <h3 className="text-2xl font-black text-white tracking-wide uppercase font-sans">Ad Blocker Detected!</h3>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                We noticed that you are using an ad blocker. <span className="font-bold text-amber-400">ThunderHost</span> relies entirely on advertising revenues to support 100% free high-performance Minecraft Servers and Bot Nodes.
+              </p>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Please disable your ad blocker for this site or add <code className="text-amber-400 font-bold bg-slate-950 px-1.5 py-0.5 rounded font-mono text-[11px]">{window.location.hostname}</code> to your safelist to unlock all dashboard management features.
+              </p>
+            </div>
+
+            <div className="bg-slate-950/40 border border-slate-800/85 rounded-2xl p-4 text-left space-y-2.5 font-mono text-[11px]">
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Ad Revenue Sponsor Scripts:</span>
+                <span className="text-red-400 font-bold flex items-center font-sans text-xs">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full mr-1.5 animate-pulse" />
+                  BLOCKED
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400 border-t border-slate-800/50 pt-2.5">
+                <span>Leaderboard DOM Unit:</span>
+                <span className="text-red-400 font-bold flex items-center font-sans text-xs">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full mr-1.5 animate-pulse" />
+                  BLOCKED
+                </span>
+              </div>
+            </div>
+
+            <button
+              id="disable-adblock-btn"
+              onClick={async () => {
+                const blocked = await detectAdBlocker();
+                setAdBlockDetected(blocked);
+                if (!blocked) {
+                  onServerNotification("Disabled! ❤️", "Thank you for supporting ThunderHost! All features are unlocked.", "success");
+                } else {
+                  onServerNotification("Still Enabled", "Please completely disable your ad blocker/extensions or Brave shields and try again.", "danger");
+                }
+              }}
+              className="w-full bg-red-650 hover:bg-red-500 hover:scale-[1.01] active:scale-[0.99] text-white font-black py-4 rounded-xl text-xs flex items-center justify-center space-x-2 transition-all duration-200 mt-4 shadow-lg shadow-red-600/15 cursor-pointer"
+            >
+              <Zap className="h-4 w-4 fill-current text-white animate-pulse" />
+              <span>I HAVE DISABLED IT, UNLOCK DASHBOARD</span>
+            </button>
+            
+            <p className="text-[9px] text-slate-500 text-center uppercase tracking-widest font-mono">
+              Dashboard locks securely until ads can resolve
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8">
       {/* Tab controls */}
@@ -727,41 +931,60 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                               <span className="text-slate-500">{server.serverType === "bot" ? "1 Coin/3 days" : "1 Coin/day"}</span>
                             </div>
                             <button
-                              onClick={() => handleRenew(server.id)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 shrink-0 grow md:grow-0 justify-center cursor-pointer shadow-md shadow-blue-505/25"
+                              onClick={() => {
+                                if (server.planId && server.planId > 1) {
+                                  handleRenew(server.id);
+                                } else {
+                                  setConfirmExtendServerId(server.id);
+                                }
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 shrink-0 grow md:grow-0 justify-center cursor-pointer shadow-md shadow-blue-500/25"
                             >
                               <RotateCw className="h-3.5 w-3.5" />
                               <span>Pay 1 Coin & Renew</span>
                             </button>
                           </div>
-                        ) : (
-                          <div className="flex flex-col md:items-end w-full space-y-2 font-sans">
-                            <div className="flex items-center space-x-1 text-slate-500 text-[11px] justify-end">
-                              <Calendar className="h-3.5 w-3.5 text-blue-500" />
-                              <span>Expires: {new Date(server.expiresAt).toLocaleDateString()}</span>
-                            </div>
+                        ) : (() => {
+                          const expiry = getExpiryInfo(server.expiresAt);
+                          return (
+                            <div className="flex flex-col md:items-end w-full space-y-2 font-sans">
+                              <div className={`flex items-center space-x-1.5 text-[11px] justify-end px-2.5 py-1 rounded-full border ${
+                                expiry.isRed 
+                                  ? "text-red-500 bg-red-500/10 border-red-500/15 font-bold animate-pulse" 
+                                  : "text-emerald-400 bg-emerald-500/10 border-emerald-500/15 font-bold"
+                              }`}>
+                                <Calendar className={`h-3.5 w-3.5 ${expiry.isRed ? "text-red-500 animate-pulse" : "text-emerald-400"}`} />
+                                <span className="tracking-wide uppercase font-mono">{expiry.label}</span>
+                              </div>
 
-                            <div className="flex items-center space-x-2 gap-1 justify-end w-full md:w-auto">
-                              <button
-                                onClick={() => setUpgradeServerId(server.id)}
-                                className="bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1 text-center cursor-pointer transition shadow-md shadow-amber-505/25"
-                                title="Upgrade server resources specs"
-                              >
-                                <Zap className="h-3.5 w-3.5 text-amber-100 animate-pulse fill-current" />
-                                <span>Upgrade</span>
-                              </button>
+                              <div className="flex items-center space-x-2 gap-1 justify-end w-full md:w-auto">
+                                <button
+                                  onClick={() => setUpgradeServerId(server.id)}
+                                  className="bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1 text-center cursor-pointer transition shadow-md shadow-amber-550/25"
+                                  title="Upgrade server resources specs"
+                                >
+                                  <Zap className="h-3.5 w-3.5 text-amber-100 animate-pulse fill-current" />
+                                  <span>Upgrade</span>
+                                </button>
 
-                              <button
-                                onClick={() => handleRenew(server.id)}
-                                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
-                                title={server.serverType === "bot" ? "Renew Bot for another 3 days (+72h)" : "Renew Server for another day (+24h)"}
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                <span>Extend</span>
-                              </button>
+                                <button
+                                  onClick={() => {
+                                    if (server.planId && server.planId > 1) {
+                                      handleRenew(server.id);
+                                    } else {
+                                      setConfirmExtendServerId(server.id);
+                                    }
+                                  }}
+                                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1 cursor-pointer transition"
+                                  title={server.serverType === "bot" ? "Renew Bot for another 3 days (+72h)" : "Renew Server for another day (+24h)"}
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  <span>Extend</span>
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   );
@@ -1484,7 +1707,14 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                         ) : (
                           <button
                             type="button"
-                            onClick={() => handleUpgrade(tgtServer.id, plan.planId)}
+                            onClick={() => {
+                              setConfirmUpgradePayload({
+                                serverId: tgtServer.id,
+                                targetPlanId: plan.planId,
+                                planName: plan.name,
+                                coinCost,
+                              });
+                            }}
                             disabled={isUpgradeLoading}
                             className="bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/10"
                           >
@@ -1556,7 +1786,11 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleRenew(tgtServer.id, "upgraded", true)}
+                    onClick={() => {
+                      if (confirm(`Confirm upgraded renewal? This will deduct ${upgradedPrice} Coins from your wallet balance.`)) {
+                        handleRenew(tgtServer.id, "upgraded", true);
+                      }
+                    }}
                     className="w-full bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1"
                   >
                     <Zap className="h-3 w-3 fill-current animate-pulse" />
@@ -1577,7 +1811,11 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleRenew(tgtServer.id, "default", true)}
+                    onClick={() => {
+                      if (confirm("Confirm standard renewal? This will deduct 1.0 Coin and reset server specs to default at the end of the current cycle.")) {
+                        handleRenew(tgtServer.id, "default", true);
+                      }
+                    }}
                     className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1"
                   >
                     <RotateCw className="h-3 w-3" />
@@ -1588,6 +1826,138 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
 
               <div className="bg-slate-950 border border-slate-800/70 p-4 rounded-xl text-xs text-left leading-relaxed leading-5 text-slate-400">
                 💡 <strong>Under the Hood:</strong> Choosing to renew as standard default allows you to enjoy upgraded specifications for the remainder of their original 24-hour duration without paying the upgraded slot renewal price for tomorrow!
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Elegant Yellow-Themed Extend Confirmation Overlay */}
+      {confirmExtendServerId && (() => {
+        const tgtServer = servers.find(s => s.id === confirmExtendServerId);
+        if (!tgtServer) return null;
+        const isBot = tgtServer.serverType === "bot";
+        const renewTimeText = isBot ? "3 days" : "24 hours";
+        const cost = 1.0;
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in select-none">
+            <div className="bg-slate-900 border border-amber-500/30 p-6 md:p-8 rounded-3xl max-w-md w-full space-y-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-32 h-32 bg-amber-500/15 blur-[50px] rounded-full pointer-events-none" />
+              
+              <div className="text-center space-y-4">
+                <div className="bg-amber-500/10 h-16 w-16 rounded-full flex items-center justify-center mx-auto text-amber-400 border border-amber-500/20 shadow-inner">
+                  <Calendar className="h-7 w-7 text-amber-500 animate-pulse" />
+                </div>
+                
+                <div className="space-y-2">
+                  <span className="text-[10px] text-amber-500 font-extrabold uppercase tracking-widest block font-mono">CONFIRM EXTENSION</span>
+                  <h3 className="text-xl font-black text-white tracking-wide uppercase font-sans">Extend Server?</h3>
+                  <p className="text-slate-300 text-xs leading-relaxed">
+                    Are you sure you want to extend duration for <span className="text-white font-bold">"{tgtServer.name}"</span>?
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2.5 font-mono">
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Additional Duration:</span>
+                  <span className="text-amber-400 font-bold">+{renewTimeText}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400 border-t border-slate-800 pt-2.5">
+                  <span>Deduction Cost:</span>
+                  <span className="text-amber-400 font-bold">{cost.toFixed(1)} Coin</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400 border-t border-slate-800 pt-2.5">
+                  <span>Your Current Balance:</span>
+                  <span className="text-slate-300">{user.coins.toFixed(1)} Coin(s)</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmExtendServerId(null)}
+                  className="flex-1 bg-slate-800 hover:bg-slate-755 text-slate-300 font-bold py-3 rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setConfirmExtendServerId(null);
+                    await handleRenew(tgtServer.id, "default", true);
+                  }}
+                  className="flex-1 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white font-black py-3 rounded-xl text-xs transition cursor-pointer shadow-lg shadow-amber-600/10 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>Confirm Extend</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Elegant Yellow-Themed Plan Upgrade Confirmation Overlay */}
+      {confirmUpgradePayload && (() => {
+        const tgtServer = servers.find(s => s.id === confirmUpgradePayload.serverId);
+        if (!tgtServer) return null;
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in select-none">
+            <div className="bg-slate-900 border border-amber-500/30 p-6 md:p-8 rounded-3xl max-w-md w-full space-y-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-32 h-32 bg-amber-500/15 blur-[50px] rounded-full pointer-events-none" />
+              
+              <div className="text-center space-y-4">
+                <div className="bg-amber-500/10 h-16 w-16 rounded-full flex items-center justify-center mx-auto text-amber-400 border border-amber-500/20 shadow-inner">
+                  <Zap className="h-7 w-7 text-amber-500 fill-current animate-bounce" />
+                </div>
+                
+                <div className="space-y-2">
+                  <span className="text-[10px] text-amber-500 font-extrabold uppercase tracking-widest block font-mono">CONFIRM COIN TRANSACTION</span>
+                  <h3 className="text-xl font-black text-white tracking-wide uppercase font-sans">Upgrade Machine?</h3>
+                  <p className="text-slate-350 text-xs leading-relaxed">
+                    Confirm specs upgrade on server <span className="text-white font-bold">"{tgtServer.name}"</span>?
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs space-y-2.5 font-mono">
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Target Specifications:</span>
+                  <span className="text-amber-450 font-bold">{confirmUpgradePayload.planName}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400 border-t border-slate-800 pt-2.5">
+                  <span>Deduction Cost:</span>
+                  <span className="text-amber-455 font-bold">{confirmUpgradePayload.coinCost.toFixed(1)} Coins</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400 border-t border-slate-800 pt-2.5">
+                  <span>Your Current Balance:</span>
+                  <span className="text-slate-300">{user.coins.toFixed(1)} Coin(s)</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmUpgradePayload(null)}
+                  className="flex-1 bg-slate-800 hover:bg-slate-755 text-slate-350 font-bold py-3 rounded-xl text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const { serverId, targetPlanId } = confirmUpgradePayload;
+                    setConfirmUpgradePayload(null);
+                    await handleUpgrade(serverId, targetPlanId);
+                  }}
+                  className="flex-1 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-white font-black py-3 rounded-xl text-xs transition cursor-pointer shadow-lg shadow-amber-600/10 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>Confirm Upgrade</span>
+                </button>
               </div>
             </div>
           </div>

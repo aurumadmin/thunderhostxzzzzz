@@ -154,8 +154,26 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 relative text-slate-200">
       
-      {/* Visual background atmospheric layer */}
-      <div className="absolute top-0 inset-x-0 h-96 bg-gradient-to-b from-blue-900/5 to-transparent pointer-events-none select-none" />
+      {/* High-quality yellow-theme background video */}
+      <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none select-none z-0 opacity-[0.08]">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="w-full h-full object-cover"
+        >
+          <source 
+            src="https://assets.mixkit.co/videos/preview/mixkit-abstract-gold-particles-loop-32943-large.mp4" 
+            type="video/mp4" 
+          />
+        </video>
+      </div>
+
+      {/* Visual background atmospheric layer - Yellow Theme */}
+      <div className="absolute top-0 inset-x-0 h-[600px] bg-gradient-to-b from-amber-500/10 via-yellow-600/5 to-transparent pointer-events-none select-none z-0" />
+      <div className="absolute top-[10%] left-[5%] w-[400px] h-[400px] bg-amber-500/5 blur-[120px] rounded-full pointer-events-none select-none z-0" />
+      <div className="absolute top-[40%] right-[10%] w-[500px] h-[500px] bg-yellow-500/3 blur-[140px] rounded-full pointer-events-none select-none z-0" />
 
       {/* Navigation header */}
       <Navbar
