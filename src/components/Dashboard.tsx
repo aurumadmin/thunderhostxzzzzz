@@ -231,24 +231,6 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
   }, []);
 
   const [adBlockDetected, setAdBlockDetected] = useState(false);
-  const [ptpKey, setPtpKey] = useState(0);
-  const [secondsToPtpRefresh, setSecondsToPtpRefresh] = useState(7);
-
-  useEffect(() => {
-    if (activeTab !== "earn") return;
-    
-    const interval = setInterval(() => {
-      setSecondsToPtpRefresh(prev => {
-        if (prev <= 1) {
-          setPtpKey(k => k + 1);
-          return 7;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeTab]);
 
   const checkAdBlock = async () => {
     const blocked = await detectAdBlocker();
@@ -1194,23 +1176,8 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                     </p>
                   </div>
 
-                  <div className="flex flex-col items-center space-y-2 pb-1">
-                    <div className="flex items-center space-x-2 text-xs font-bold text-amber-450 font-mono bg-amber-500/8 px-3 py-1 rounded-full border border-amber-500/15">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                      <span>SPONSOR ROTATION IN: {secondsToPtpRefresh}s</span>
-                    </div>
-                    {/* Visual Progress bar */}
-                    <div className="w-full max-w-xs h-1 px-[1px] bg-slate-950 rounded-full overflow-hidden border border-slate-800/80">
-                      <div 
-                        className="bg-amber-500 h-full transition-all duration-1000 ease-linear rounded-full"
-                        style={{ width: `${(secondsToPtpRefresh / 7) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-
                   <div className="w-full flex justify-center items-center rounded-2xl overflow-hidden border border-slate-800 bg-black shadow-inner">
                     <iframe
-                      key={ptpKey}
                       src="https://www.rotate4all.com/promote/pt13azaa9mf1"
                       title="Sponsor Promo"
                       className="w-full h-[500px] md:h-[650px] border-0"
