@@ -64,7 +64,61 @@ declare global {
 
 // --- Auth Endpoints ---
 
-app.post("/api/auth/register", (req, res) => {
+// Helper: Detailed Proxy, VPN, Tor and hosting-provider IP detection
+async function isIpVpnOrProxy(ip: string): Promise<{ isVpn: boolean; reason?: string }> {
+  // If loopback or local, bypass
+  if (!ip || ip === "127.0.0.1" || ip === "::1" || ip === "localhost" || ip.startsWith("10.") || ip.startsWith("192.168.")) {
+    return { isVpn: false };
+  }
+
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 2500); // 2.5s maximum timeout to preserve registration response speed
+
+    const response = await fetch(`http://ipwho.is/${encodeURIComponent(ip)}`, { signal: controller.signal });
+    clearTimeout(id);
+
+    if (response.ok) {
+      const data: any = await response.json();
+      if (data && data.success) {
+        const security = data.security || {};
+        const conn = data.connection || {};
+        const org = String(conn.org || "").toLowerCase();
+        const isp = String(conn.isp || "").toLowerCase();
+
+        if (security.vpn) {
+          return { isVpn: true, reason: "VPN connection detected. Please disable VPN to register." };
+        }
+        if (security.proxy) {
+          return { isVpn: true, reason: "Proxy connection detected. Please disable proxy tunnel to register." };
+        }
+        if (security.tor) {
+          return { isVpn: true, reason: "Tor exit node detected. Please use a regular browser connection." };
+        }
+        if (security.hosting) {
+          return { isVpn: true, reason: "Datacenter/Hosting provider IP detected. Registrations from VPS or cloud networks are prohibited." };
+        }
+
+        // Catch common datacenter org strings as secondary safeguard
+        const dcKeywords = [
+          "hosting", "cloud", "ovh", "server", "aws", "google llc", "amazon", "digitalocean", 
+          "linode", "vultr", "scaleway", "hetzner", "m247", "leaseweb", "combahton", "datacenter", 
+          "vpn", "proxy", "cogent", "colocrossing", "sharktech", "multacom", "choopa", "kamatera"
+        ];
+        for (const kw of dcKeywords) {
+          if (org.includes(kw) || isp.includes(kw)) {
+            return { isVpn: true, reason: `Proxy/hosting provider network detected (${conn.isp || conn.org}). Please register using your mobile data or home Wi-Fi.` };
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn(`[VPN PREVENTER] Failed resolving ip intelligence check for ${ip}:`, error);
+  }
+  return { isVpn: false };
+}
+
+app.post("/api/auth/register", async (req, res) => {
   const { username, email, password } = req.body;
 
   if (!username || !email || !password) {
@@ -80,6 +134,13 @@ app.post("/api/auth/register", (req, res) => {
 
   const rawIp = req.headers["x-forwarded-for"] as string || req.headers["x-real-ip"] as string || req.socket.remoteAddress || "";
   const ip = rawIp.split(",")[0].trim();
+
+  // 1. VPN / Proxy Check
+  const vpnCheck = await isIpVpnOrProxy(ip);
+  if (vpnCheck.isVpn) {
+    res.status(400).json({ message: vpnCheck.reason || "VPN/Proxy usage detected. Registrations from VPN or Hosting providers are strictly prohibited to prevent multiple accounts." });
+    return;
+  }
 
   // Restrict creating multiple accounts from a single IP (bypass loopback/localhost)
   if (ip && ip !== "127.0.0.1" && ip !== "::1" && ip !== "localhost") {

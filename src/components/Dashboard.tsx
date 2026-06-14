@@ -47,6 +47,52 @@ function AdCodeRenderer({ html, sizeLabel }: { html: string; sizeLabel: string }
   return <div ref={containerRef} className="flex justify-center items-center overflow-auto max-w-full mx-auto" />;
 }
 
+export async function detectAdBlocker(): Promise<boolean> {
+  // Test 1: Try to fetch a script that is blocked by almost all ad blockers
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    await fetch("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js", {
+      method: "HEAD",
+      mode: "no-cors",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    clearTimeout(id);
+  } catch (err) {
+    return true; // network request blocked by adblock extension
+  }
+
+  // Test 2: Inject a dummy ad div with common ad classes and check styles/dimensions
+  let isDOMBlocked = false;
+  try {
+    const testAd = document.createElement("div");
+    testAd.innerHTML = "&nbsp;";
+    testAd.className = "ads banner-ad ad-banner pub_300x250 pub_300x250m pub_728x90 text-ad textAd text_ad text_ads text-ads";
+    testAd.setAttribute("style", "position: absolute; top: -999px; left: -999px; width: 1px; height: 1px; pointer-events: none; opacity: 0;");
+    document.body.appendChild(testAd);
+    
+    // Small delay to ensure render tree styles calculation
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    if (
+      testAd.offsetHeight === 0 ||
+      testAd.offsetWidth === 0 ||
+      testAd.clientHeight === 0 ||
+      testAd.clientWidth === 0 ||
+      window.getComputedStyle(testAd).display === "none" ||
+      window.getComputedStyle(testAd).visibility === "hidden"
+    ) {
+      isDOMBlocked = true;
+    }
+    document.body.removeChild(testAd);
+  } catch (e) {
+    console.error("DOM ad-block test failed:", e);
+  }
+
+  return isDOMBlocked;
+}
+
 interface DashboardProps {
   user: User;
   onRefreshUser: () => Promise<void>;
@@ -183,6 +229,43 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
       console.error(e);
     }
   }, []);
+
+  const [adBlockDetected, setAdBlockDetected] = useState(false);
+  const [ptpKey, setPtpKey] = useState(0);
+  const [secondsToPtpRefresh, setSecondsToPtpRefresh] = useState(7);
+
+  useEffect(() => {
+    if (activeTab !== "earn") return;
+    
+    const interval = setInterval(() => {
+      setSecondsToPtpRefresh(prev => {
+        if (prev <= 1) {
+          setPtpKey(k => k + 1);
+          return 7;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
+  const checkAdBlock = async () => {
+    const blocked = await detectAdBlocker();
+    setAdBlockDetected(blocked);
+  };
+
+  useEffect(() => {
+    checkAdBlock();
+    const interval = setInterval(checkAdBlock, 8000); // Check every 8 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "earn" || activeTab === "shorteners") {
+      checkAdBlock();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     loadDashboardData();
@@ -423,7 +506,14 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
     return () => clearTimeout(t);
   }, [isWatching, secondsLeft]);
 
-  const startWatchingAd = (ad: SponsoredAd) => {
+  const startWatchingAd = async (ad: SponsoredAd) => {
+    const isBlocked = await detectAdBlocker();
+    setAdBlockDetected(isBlocked);
+    if (isBlocked) {
+      onServerNotification("Ad Blocker Detected", "Please completely disable your ad blocker to support our server hosting cost and watch ads.", "danger");
+      return;
+    }
+
     if (user.claimsToday >= 25) {
       onServerNotification("Daily limit reached", "You have claimed the maximum 2.5 coins reward for today. Come back tomorrow!", "warning");
       return;
@@ -911,43 +1001,74 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 blur-[60px] rounded-full pointer-events-none" />
 
                 {!isWatching ? (
-                  <div className="py-10 space-y-6 max-w-lg mx-auto">
-                    <div className="bg-amber-500/10 h-20 w-20 rounded-full flex items-center justify-center mx-auto text-amber-500 border border-amber-500/20 shadow-inner relative">
-                      <div className="absolute inset-0 bg-amber-500/5 rounded-full animate-pulse" />
-                      <Zap className="h-9 w-9 text-amber-400 fill-amber-400" />
-                    </div>
+                  adBlockDetected ? (
+                    <div className="py-12 px-6 space-y-6 max-w-lg mx-auto">
+                      <div className="bg-red-500/10 h-20 w-20 rounded-full flex items-center justify-center mx-auto text-red-505 border border-red-500/20 shadow-inner relative">
+                        <div className="absolute inset-0 bg-red-500/5 rounded-full animate-pulse" />
+                        <AlertTriangle className="h-9 w-9 text-red-400" />
+                      </div>
 
-                    <div className="space-y-3">
-                      <h3 className="text-2xl font-black text-white tracking-wide font-sans">Ready to Earn?</h3>
-                      <p className="text-slate-400 text-sm leading-relaxed font-medium">
-                        Watch an ad for 15 seconds and earn 0.1 THUNDERS ⚡
-                      </p>
-                    </div>
+                      <div className="space-y-3">
+                        <h3 className="text-2xl font-black text-white tracking-wide">Ad Blocker Detected!</h3>
+                        <p className="text-slate-405 text-sm leading-relaxed font-sans font-medium">
+                          We noticed that you are using an ad blocker. ThunderHost relies on advertising revenues to support free Minecraft Servers and Bot Nodes. To continue earning coins, please disable your ad blocker for <b>this site</b> and click check again.
+                        </p>
+                      </div>
 
-                    <button
-                      onClick={() => startWatchingAd({ id: "standard_banner_ad", title: "Standard Banner Stream", duration: 15, reward: 0.1, type: "video" })}
-                      disabled={user.claimsToday >= 25}
-                      className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 disabled:bg-slate-850 disabled:text-slate-500 hover:scale-[1.02] active:scale-[0.98] transition-all font-black px-10 py-4 rounded-xl text-sm flex items-center justify-center space-x-2.5 mx-auto cursor-pointer shadow-lg shadow-amber-500/10 text-slate-950"
-                    >
-                      <Zap className="h-4 w-4 fill-current text-slate-950" />
-                      <span>Start Watching</span>
-                    </button>
-                    
-                    {/* Multi-ad promo display when idle */}
-                    <div className="border-t border-slate-800/80 pt-8 mt-6">
-                      <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-3 block select-none">Supported Sponsor Media Platforms</span>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                        <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-center items-center min-h-[200px]">
-                          <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider mb-2 select-none">AdSense Banner unit</span>
-                          <AdCodeRenderer html={banner300x250} sizeLabel="Rectangle 300x250" />
-                        </div>
-                        <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-center items-center min-h-[200px]">
-                          <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider mb-2 select-none">Broadcaster Tower Unit</span>
-                          <AdCodeRenderer html={banner160x600} sizeLabel="Skyscraper 160x600" />
+                      <button
+                        onClick={async () => {
+                          const blocked = await detectAdBlocker();
+                          setAdBlockDetected(blocked);
+                          if (!blocked) {
+                            onServerNotification("Disabled! ❤️", "Thank you for supporting us! You can now watch ads.", "success");
+                          } else {
+                            onServerNotification("Still Enabled", "Please disable your ad blocker completely and click check again.", "danger");
+                          }
+                        }}
+                        className="bg-red-500 hover:bg-red-400 text-white font-black px-8 py-3.5 rounded-xl text-xs transition duration-200 mt-4 shadow-lg shadow-red-500/10 cursor-pointer"
+                      >
+                        I have disabled it, check again
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="py-10 space-y-6 max-w-lg mx-auto">
+                      <div className="bg-amber-500/10 h-20 w-20 rounded-full flex items-center justify-center mx-auto text-amber-500 border border-amber-500/20 shadow-inner relative">
+                        <div className="absolute inset-0 bg-amber-500/5 rounded-full animate-pulse" />
+                        <Zap className="h-9 w-9 text-amber-400 fill-amber-400" />
+                      </div>
+
+                      <div className="space-y-3">
+                        <h3 className="text-2xl font-black text-white tracking-wide font-sans">Ready to Earn?</h3>
+                        <p className="text-slate-400 text-sm leading-relaxed font-medium">
+                          Watch an ad for 15 seconds and earn 0.1 THUNDERS ⚡
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => startWatchingAd({ id: "standard_banner_ad", title: "Standard Banner Stream", duration: 15, reward: 0.1, type: "video" })}
+                        disabled={user.claimsToday >= 25}
+                        className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 disabled:bg-slate-850 disabled:text-slate-500 hover:scale-[1.02] active:scale-[0.98] transition-all font-black px-10 py-4 rounded-xl text-sm flex items-center justify-center space-x-2.5 mx-auto cursor-pointer shadow-lg shadow-amber-500/10 text-slate-950"
+                      >
+                        <Zap className="h-4 w-4 fill-current text-slate-950" />
+                        <span>Start Watching</span>
+                      </button>
+                      
+                      {/* Multi-ad promo display when idle */}
+                      <div className="border-t border-slate-800/80 pt-8 mt-6">
+                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-3 block select-none">Supported Sponsor Media Platforms</span>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                          <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-center items-center min-h-[200px]">
+                            <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider mb-2 select-none">AdSense Banner unit</span>
+                            <AdCodeRenderer html={banner300x250} sizeLabel="Rectangle 300x250" />
+                          </div>
+                          <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/60 flex flex-col justify-center items-center min-h-[200px]">
+                            <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider mb-2 select-none">Broadcaster Tower Unit</span>
+                            <AdCodeRenderer html={banner160x600} sizeLabel="Skyscraper 160x600" />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  )
                 ) : (
                   // ACTIVE AD WATCHER SECTION OR COMPLETED TASK
                   <div className="py-10 max-w-xl mx-auto space-y-10 relative">
@@ -1060,6 +1181,43 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                   </div>
                 )}
               </div>
+
+              {/* PTP Promotion Section */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-32 h-32 bg-amber-500/5 blur-[50px] rounded-full pointer-events-none" />
+                <div className="text-center space-y-4">
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-amber-400 font-bold uppercase tracking-widest block">PROMOTIONAL SPONSOR</span>
+                    <h4 className="text-lg font-black text-white tracking-wide">Paid-To-Promote Stream</h4>
+                    <p className="text-xs text-slate-400 max-w-xl mx-auto mt-1 leading-relaxed">
+                      Keep this section loaded to support our high-performance Minecraft hosts. Automated advertiser networks rotate here to keep ThunderHost 100% free!
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-center space-y-2 pb-1">
+                    <div className="flex items-center space-x-2 text-xs font-bold text-amber-450 font-mono bg-amber-500/8 px-3 py-1 rounded-full border border-amber-500/15">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                      <span>SPONSOR ROTATION IN: {secondsToPtpRefresh}s</span>
+                    </div>
+                    {/* Visual Progress bar */}
+                    <div className="w-full max-w-xs h-1 px-[1px] bg-slate-950 rounded-full overflow-hidden border border-slate-800/80">
+                      <div 
+                        className="bg-amber-500 h-full transition-all duration-1000 ease-linear rounded-full"
+                        style={{ width: `${(secondsToPtpRefresh / 7) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="w-full flex justify-center items-center rounded-2xl overflow-hidden border border-slate-800 bg-black shadow-inner">
+                    <iframe
+                      key={ptpKey}
+                      src="https://www.rotate4all.com/promote/pt13azaa9mf1"
+                      title="Sponsor Promo"
+                      className="w-full h-[500px] md:h-[650px] border-0"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* RIGHT SIDEBAR AD TOWERS (Desktop XL+) */}
@@ -1123,6 +1281,36 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                 </div>
               </div>
 
+              {adBlockDetected && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-3xl p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl select-none animate-pulse">
+                  <div className="flex items-center space-x-4">
+                    <div className="bg-red-500/20 p-3.5 rounded-2xl flex items-center justify-center text-red-400">
+                      <AlertTriangle className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <span className="text-md font-extrabold text-white block">Ad Blocker Detected!</span>
+                      <span className="text-xs text-slate-400 block mt-1 leading-relaxed max-w-xl">
+                        You have an active ad blocker enabled. Please completely disable it for this site to generate shortener earnings links and complete task campaigns.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const blocked = await detectAdBlocker();
+                      setAdBlockDetected(blocked);
+                      if (!blocked) {
+                        onServerNotification("Disabled! ❤️", "Thank you! You can now resume completing shortener tasks.", "success");
+                      } else {
+                        onServerNotification("Still Enabled", "Please check your browser settings or privacy extensions.", "warning");
+                      }
+                    }}
+                    className="bg-red-500 hover:bg-red-400 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition cursor-pointer scale-100 hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    Check again
+                  </button>
+                </div>
+              )}
+
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[60px] rounded-full pointer-events-none" />
                 <div>
@@ -1169,6 +1357,13 @@ export default function Dashboard({ user, onRefreshUser, onServerNotification }:
                         ) : (
                           <button
                             onClick={async () => {
+                              const blocked = await detectAdBlocker();
+                              setAdBlockDetected(blocked);
+                              if (blocked) {
+                                onServerNotification("Ad Blocker Detected", "Please disable your ad blocker to access premium shortener reward tasks.", "danger");
+                                return;
+                              }
+
                               try {
                                 setGeneratingShortenerId(sh.id);
                                 const res = await api.generateShortenerLink(sh.id);
