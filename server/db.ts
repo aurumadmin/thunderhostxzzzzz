@@ -183,6 +183,27 @@ class JSONDatabase {
     return Object.values(this.data.users);
   }
 
+  deleteUser(email: string): void {
+    const targetEmail = email.toLowerCase();
+    delete this.data.users[targetEmail];
+    
+    // Also delete any servers owned by this user
+    for (const key of Object.keys(this.data.servers)) {
+      if (this.data.servers[key].ownerEmail.toLowerCase() === targetEmail) {
+        delete this.data.servers[key];
+      }
+    }
+    
+    // Also delete associated notifications
+    this.data.notifications = this.data.notifications.filter(n => n.userEmail.toLowerCase() !== targetEmail);
+    
+    // Also delete shortener completions
+    if (this.data.shortenerCompletions) {
+      this.data.shortenerCompletions = this.data.shortenerCompletions.filter(c => c.userEmail.toLowerCase() !== targetEmail);
+    }
+    this.save();
+  }
+
   // --- Servers CRUD ---
   getServer(id: string): MCServer | undefined {
     this.init();
@@ -405,6 +426,11 @@ class JSONDatabase {
   saveShorteners(shorteners: UrlShortener[]): void {
     this.data.shorteners = shorteners;
     this.save();
+  }
+
+  getAllShortenerCompletions(): ShortenerCompletion[] {
+    this.init();
+    return this.data.shortenerCompletions || [];
   }
 
   // --- Completions CRUD ---

@@ -5,6 +5,7 @@ import HomeHero from "./components/HomeHero";
 import AuthModal from "./components/AuthModal";
 import Dashboard from "./components/Dashboard";
 import AdminPanel from "./components/AdminPanel";
+import LegalModal from "./components/LegalModals";
 import { api } from "./api";
 import { Notification, User } from "./types";
 
@@ -18,6 +19,7 @@ interface Toast {
 export default function App() {
   // Current user profiles state
   const [user, setUser] = useState<User | null>(null);
+  const [legalModal, setLegalModal] = useState<"tos" | "privacy" | "about" | null>(null);
   const [view, setView] = useState<"home" | "dashboard" | "admin">("home");
   const [authModal, setAuthModal] = useState<{ isOpen: boolean; mode: "login" | "register" }>({
     isOpen: false,
@@ -239,10 +241,10 @@ export default function App() {
             </p>
 
             {/* Nav Menu Shortcuts */}
-            <div className="flex items-center justify-center space-x-6 text-xs md:text-sm text-slate-500 font-semibold">
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs md:text-sm text-slate-500 font-semibold mb-2">
               <button 
                 onClick={() => handleNavigate("home")} 
-                className="hover:text-white transition-colors duration-200 focus:outline-none"
+                className="hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer"
               >
                 Home
               </button>
@@ -256,9 +258,27 @@ export default function App() {
                     }
                   }, 100);
                 }} 
-                className="hover:text-white transition-colors duration-200 focus:outline-none"
+                className="hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer"
               >
                 Plans
+              </button>
+              <button 
+                onClick={() => setLegalModal("tos")} 
+                className="hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer"
+              >
+                Terms of Service
+              </button>
+              <button 
+                onClick={() => setLegalModal("privacy")} 
+                className="hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer"
+              >
+                Privacy Policy
+              </button>
+              <button 
+                onClick={() => setLegalModal("about")} 
+                className="hover:text-white transition-colors duration-200 focus:outline-none cursor-pointer"
+              >
+                About Us
               </button>
               <a 
                 href="https://discord.gg/XYZ3EqwrrF" 
@@ -322,6 +342,9 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      {/* Legal Compliance Modals (Terms, Privacy, About) */}
+      <LegalModal type={legalModal} onClose={() => setLegalModal(null)} />
 
     </div>
   );

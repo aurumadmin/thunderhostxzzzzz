@@ -11,6 +11,18 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Helper to convert any Date or ISO String to its YYYY-MM-DD format in India Standard Time (IST, UTC+5:30)
+function getISTDateString(dateInput?: Date | string): string {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  // Shift local UTC time to IST (UTC + 5.5 hours)
+  const istTime = d.getTime() + (5.5 * 60 * 60 * 1000);
+  const istDate = new Date(istTime);
+  const yyyy = istDate.getUTCFullYear();
+  const mm = String(istDate.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(istDate.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // --- Helper: Simple Authentication Middleware ---
 // Since we run in sandbox preview, we use safe Bearer token parsing where
 // token = email of the user (or base64 of it).
@@ -41,7 +53,7 @@ function authenticateToken(req: express.Request, res: express.Response, next: ex
   }
 
   // Setup current local YYYY-MM-DD to reset ad claims daily if context calendar shifted
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getISTDateString();
   if (user.lastClaimDate !== todayStr) {
     db.updateUser(user.email, u => {
       u.claimsToday = 0;
@@ -162,7 +174,7 @@ app.post("/api/auth/register", async (req, res) => {
     isSuspended: false,
     role: isDefaultAdmin ? "admin" : "user",
     claimsToday: 0,
-    lastClaimDate: new Date().toISOString().split("T")[0],
+    lastClaimDate: getISTDateString(),
     createdAt: new Date().toISOString(),
     registrationIp: ip || undefined
   };
@@ -747,7 +759,7 @@ app.post("/api/ads/claim", authenticateToken, (req, res) => {
   const updated = db.updateUser(user.email, u => {
     u.coins = parseFloat((u.coins + rewardAmount).toFixed(2));
     u.claimsToday += 1;
-    u.lastClaimDate = new Date().toISOString().split("T")[0];
+    u.lastClaimDate = getISTDateString();
   });
 
   db.addNotification({
@@ -784,6 +796,13 @@ app.post("/api/notifications/clear", authenticateToken, (req, res) => {
 });
 
 // --- ADMIN CONTROL PANEL ENDPOINTS (Access restricted to designated team emails) ---
+
+const MAIN_ADMINS = ["teamthunderofficialyt@gmail.com", "freefiregtamcpe@gmail.com"];
+
+function isMainAdmin(email: string): boolean {
+  if (!email) return false;
+  return MAIN_ADMINS.includes(email.toLowerCase());
+}
 
 function verifyAdminPrivileges(req: express.Request, res: express.Response, next: express.NextFunction) {
   authenticateToken(req, res, () => {
@@ -927,6 +946,17 @@ app.post("/api/admin/users/:email/suspend", verifyAdminPrivileges, (req, res) =>
     return;
   }
 
+  // Protect main admins from normal admins
+  if (isMainAdmin(targetEmail)) {
+    if (!isMainAdmin(req.user!.email)) {
+      res.status(403).json({ message: "Security Violation: Normal admins cannot modify or suspend Main Admin accounts!" });
+      return;
+    }
+    // Main admins can't suspend other main admins either to prevent system lockout
+    res.status(400).json({ message: "Main Administrators cannot be suspended!" });
+    return;
+  }
+
   const updated = db.updateUser(targetEmail, u => {
     u.isSuspended = !u.isSuspended;
   });
@@ -947,16 +977,51 @@ app.post("/api/admin/users/:email/suspend", verifyAdminPrivileges, (req, res) =>
   });
 });
 
+app.delete("/api/admin/users/:email", verifyAdminPrivileges, (req, res) => {
+  const targetEmail = req.params.email;
+  const targetUser = db.getUser(targetEmail);
+
+  if (!targetUser) {
+    res.status(404).json({ message: "Target user not found." });
+    return;
+  }
+
+  // Prevent self-deletion
+  if (targetEmail.toLowerCase() === req.user!.email.toLowerCase()) {
+    res.status(400).json({ message: "You cannot delete your own admin account!" });
+    return;
+  }
+
+  // Protect main admins from deletion
+  if (isMainAdmin(targetEmail)) {
+    res.status(403).json({ message: "Security Violation: Main Admin accounts are core system masters and cannot be deleted!" });
+    return;
+  }
+
+  db.deleteUser(targetEmail);
+
+  res.json({
+    message: `Account associated with "${targetEmail}" has been permanently purged and deleted, along with all associated resources.`
+  });
+});
+
 app.post("/api/admin/users/:email/add-coins", verifyAdminPrivileges, (req, res) => {
   const { amount } = req.body;
-  const targetUser = db.getUser(req.params.email);
+  const targetEmail = req.params.email;
+  const targetUser = db.getUser(targetEmail);
 
   if (!targetUser) {
     res.status(404).json({ message: "User not found" });
     return;
   }
 
-  const updated = db.updateUser(req.params.email, u => {
+  // Protect main admins from coins tampering by basic admins
+  if (isMainAdmin(targetEmail) && !isMainAdmin(req.user!.email)) {
+    res.status(403).json({ message: "Security Violation: Normal admins cannot credit/modify coins of Main Admin accounts!" });
+    return;
+  }
+
+  const updated = db.updateUser(targetEmail, u => {
     u.coins = parseFloat((u.coins + Number(amount)).toFixed(2));
   });
 
@@ -971,6 +1036,105 @@ app.post("/api/admin/users/:email/add-coins", verifyAdminPrivileges, (req, res) 
   });
 
   res.json({ message: `Successfully added ${amount} coins. New balance: ${updated?.coins}`, coins: updated?.coins });
+});
+
+// New endpoint: assign/demote administration privileges (Main Admins only)
+app.post("/api/admin/users/:email/role", verifyAdminPrivileges, (req, res) => {
+  const targetEmail = req.params.email;
+  const { role } = req.body;
+
+  if (role !== "admin" && role !== "user") {
+    res.status(400).json({ message: "Invalid role specified. Must be 'admin' or 'user'." });
+    return;
+  }
+
+  const targetUser = db.getUser(targetEmail);
+  if (!targetUser) {
+    res.status(404).json({ message: "Target user not found." });
+    return;
+  }
+
+  // Protect main admins from role changes
+  if (isMainAdmin(targetEmail)) {
+    res.status(403).json({ message: "Security Violation: Main Admin status is permanent and cannot be modified!" });
+    return;
+  }
+
+  // Only main admins can allocate role changes
+  if (!isMainAdmin(req.user!.email)) {
+    res.status(403).json({ message: "Security Violation: Only Main Administrators can promote or demote other admin roles!" });
+    return;
+  }
+
+  // Prevent self-demotion
+  if (targetEmail.toLowerCase() === req.user!.email.toLowerCase()) {
+    res.status(400).json({ message: "You cannot demote yourself!" });
+    return;
+  }
+
+  const updated = db.updateUser(targetEmail, u => {
+    u.role = role;
+  });
+
+  db.addNotification({
+    id: Math.random().toString(36).substring(7),
+    userEmail: targetUser.email,
+    title: role === "admin" ? "🛡️ Promoted to Administrator" : "🛡️ Admin Access Revoked",
+    message: role === "admin" 
+      ? `A Main Administrator has promoted you to server administrator. You are now authorized to view and modify system configurations.` 
+      : `Your administrator panel privileges have been terminated.`,
+    type: role === "admin" ? "success" : "warning",
+    isRead: false,
+    createdAt: new Date().toISOString()
+  });
+
+  res.json({
+    message: role === "admin" 
+      ? `Successfully promoted "${targetEmail}" to Administrator status.` 
+      : `Successfully demoted "${targetEmail}" back to standard user level.`,
+    user: updated
+  });
+});
+
+// New endpoint: Day-wise statistics report of shortener completions for admins
+app.get("/api/admin/shortener-stats", verifyAdminPrivileges, (req, res) => {
+  const completions = db.getAllShortenerCompletions();
+  const shorteners = db.getShorteners();
+  const shortenerMap = new Map(shorteners.map(s => [s.id, s]));
+
+  const daysReport: Record<string, { date: string; completionsCount: number; uniqueUsers: Set<string>; totalCoinsRewarded: number }> = {};
+
+  completions.forEach(c => {
+    if (!c.completedAt) return;
+    const dateStr = getISTDateString(c.completedAt); // YYYY-MM-DD in IST
+    if (!daysReport[dateStr]) {
+      daysReport[dateStr] = {
+        date: dateStr,
+        completionsCount: 0,
+        uniqueUsers: new Set<string>(),
+        totalCoinsRewarded: 0
+      };
+    }
+
+    daysReport[dateStr].completionsCount += 1;
+    daysReport[dateStr].uniqueUsers.add(c.userEmail.toLowerCase());
+
+    const sVal = shortenerMap.get(c.shortenerId);
+    if (sVal) {
+      daysReport[dateStr].totalCoinsRewarded += sVal.reward;
+    } else {
+      daysReport[dateStr].totalCoinsRewarded += 1.0; // fallback standard coin reward
+    }
+  });
+
+  const finalReport = Object.values(daysReport).map(item => ({
+    date: item.date,
+    completionsCount: item.completionsCount,
+    uniqueUsersCount: item.uniqueUsers.size,
+    totalCoinsRewarded: parseFloat(item.totalCoinsRewarded.toFixed(2))
+  })).sort((a, b) => b.date.localeCompare(a.date));
+
+  res.json(finalReport);
 });
 
 app.get("/api/admin/settings", verifyAdminPrivileges, (req, res) => {
@@ -1047,11 +1211,11 @@ app.post("/api/admin/ads", verifyAdminPrivileges, (req, res) => {
 app.get("/api/shorteners", authenticateToken, (req, res) => {
   try {
     const completions = db.getShortenerCompletions(req.user!.email);
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = getISTDateString();
 
     const shorteners = db.getShorteners().map(s => {
       const todayCompletions = completions.filter(
-        c => c.shortenerId === s.id && c.completedAt.split("T")[0] === todayStr
+        c => c.shortenerId === s.id && getISTDateString(c.completedAt) === todayStr
       );
       const limit = typeof s.viewsLimit !== 'undefined' && s.viewsLimit !== null ? s.viewsLimit : 1;
       const completedCount = todayCompletions.length;
@@ -1084,9 +1248,9 @@ app.post("/api/shorteners/:id/generate", authenticateToken, async (req, res) => 
     }
 
     const completions = db.getShortenerCompletions(req.user!.email);
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = getISTDateString();
     const todayCompletions = completions.filter(
-      c => c.shortenerId === shortenerId && c.completedAt.split("T")[0] === todayStr
+      c => c.shortenerId === shortenerId && getISTDateString(c.completedAt) === todayStr
     );
     const limit = typeof shortener.viewsLimit !== 'undefined' && shortener.viewsLimit !== null ? shortener.viewsLimit : 1;
 

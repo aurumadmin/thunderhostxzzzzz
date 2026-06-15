@@ -10,7 +10,9 @@ interface AdminPanelProps {
   onBackToDashboard: () => void;
 }
 
-type AdminTab = "servers" | "users" | "settings" | "ad-settings" | "shorteners";
+type AdminTab = "servers" | "users" | "settings" | "ad-settings" | "shorteners" | "shortener_stats";
+
+const MAIN_ADMIN_EMAILS = ["teamthunderofficialyt@gmail.com", "freefiregtamcpe@gmail.com"];
 
 export default function AdminPanel({
   user,
@@ -27,6 +29,7 @@ export default function AdminPanel({
   const [settings, setSettings] = useState<PterodactylSettings | null>(null);
   const [adsInventory, setAdsInventory] = useState<SponsoredAd[]>([]);
   const [shorteners, setShorteners] = useState<UrlShortener[]>([]);
+  const [shortenerDailyStats, setShortenerDailyStats] = useState<any[]>([]);
 
   // Editing forms state
   const [loading, setLoading] = useState(true);
@@ -146,6 +149,13 @@ export default function AdminPanel({
         console.error("Failed to load admin shorteners list", err);
       }
 
+      try {
+        const fetchedStats = await api.getShortenerStats();
+        setShortenerDailyStats(fetchedStats);
+      } catch (err) {
+        console.error("Failed to load admin shorteners daily statistics", err);
+      }
+
     } catch (err: any) {
       onServerNotification("Admin Request Failed", err?.message || "Failed to load administrative details.", "danger");
     } finally {
@@ -221,6 +231,38 @@ export default function AdminPanel({
       await refreshAllAdminData();
     } catch (e: any) {
       onServerNotification("Allocation failed", e.message, "danger");
+    }
+  };
+
+  // Delete user account
+  const handleAdminDeleteUser = async (targetEmail: string) => {
+    if (!confirm(`Are you sure you want to PERMANENTLY delete user "${targetEmail}"?\n\nWARNING: This will permanently delete their account, zero their wallet, and DELETE ALL THEIR ACTIVE SERVERS/BOT RUNTIMES. This process is completely irreversible!`)) {
+      return;
+    }
+
+    try {
+      const res = await api.deleteUser(targetEmail);
+      onServerNotification("User Purged", res.message, "success");
+      await refreshAllAdminData();
+    } catch (e: any) {
+      onServerNotification("User Purge Failed", e.message, "danger");
+    }
+  };
+
+  // Change user role (Main Admin credentials check on server-side)
+  const handleChangeUserRole = async (targetEmail: string, newRole: "admin" | "user") => {
+    let confirmMsg = `Are you sure you want to promote "${targetEmail}" to an Administrator?\n\nThey will gain full access to the Admin Panel of ThunderHost!`;
+    if (newRole === "user") {
+      confirmMsg = `Are you sure you want to revoke Administrator access from "${targetEmail}"?`;
+    }
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const res = await api.setUserRole(targetEmail, newRole);
+      onServerNotification("User Role Updated", res.message, "success");
+      await refreshAllAdminData();
+    } catch (e: any) {
+      onServerNotification("Role Assignment Failed", e.message, "danger");
     }
   };
 
@@ -427,6 +469,14 @@ export default function AdminPanel({
         >
           <Plus className="h-4 w-4 text-emerald-500" />
           <span>Config Shorteners ({shorteners.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("shortener_stats")}
+          className={`px-4 py-2.5 rounded-t-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition ${activeTab === "shortener_stats" ? "bg-blue-500/12 border-t border-r border-l border-slate-800 text-blue-405 font-black" : "text-slate-400 hover:text-slate-200"}`}
+        >
+          <Activity className="h-4 w-4 text-purple-500" />
+          <span>Shortener Stats</span>
         </button>
       </div>
 
@@ -749,9 +799,13 @@ export default function AdminPanel({
                           )}
                         </td>
                         <td className="p-4">
-                          {currUser.role === "admin" ? (
+                          {MAIN_ADMIN_EMAILS.includes(currUser.email.toLowerCase()) ? (
+                            <span className="bg-red-500/10 text-red-500 border border-red-500/30 text-[9px] px-2 py-0.5 rounded uppercase font-bold tracking-wider">
+                              🔑 MAIN MASTER ADMIN
+                            </span>
+                          ) : currUser.role === "admin" ? (
                             <span className="bg-amber-500/10 text-amber-500 border border-amber-500/30 text-[9px] px-2 py-0.5 rounded uppercase font-bold tracking-wider">
-                              OFFICIAL ADMIN
+                              🛡️ DELEGATED ADMIN
                             </span>
                           ) : (
                             <span className="bg-slate-800 text-slate-400 text-[9px] px-2 py-0.5 rounded uppercase font-bold tracking-wider">
@@ -777,22 +831,44 @@ export default function AdminPanel({
                           )}
                         </td>
                         <td className="p-4 text-right">
-                          <div className="flex items-center justify-end space-x-2">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <button
+                              disabled={MAIN_ADMIN_EMAILS.includes(currUser.email.toLowerCase()) && !MAIN_ADMIN_EMAILS.includes(user.email.toLowerCase())}
                               onClick={() => handleAwardCoins(currUser.email)}
-                              className="bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500 text-yellow-400 hover:text-slate-950 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer"
+                              className="bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500 text-yellow-400 hover:text-slate-950 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-30"
                               title="Gift custom amount of THUNDERS"
                             >
                               Add Coins
                             </button>
                             
+                            {MAIN_ADMIN_EMAILS.includes(user.email.toLowerCase()) && !MAIN_ADMIN_EMAILS.includes(currUser.email.toLowerCase()) && (
+                              <button
+                                onClick={() => handleChangeUserRole(currUser.email, currUser.role === "admin" ? "user" : "admin")}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer flex items-center space-x-1 ${currUser.role === "admin" ? "bg-amber-950/40 border-amber-900/60 text-amber-400 hover:bg-amber-600 hover:text-white" : "bg-blue-950/40 border-blue-900/60 text-blue-400 hover:bg-blue-600 hover:text-white"}`}
+                                title={currUser.role === "admin" ? "Demote user to normal role" : "Promote user to administrator role"}
+                              >
+                                <Shield className="h-3.5 w-3.5" />
+                                <span>{currUser.role === "admin" ? "Demote" : "Promote"}</span>
+                              </button>
+                            )}
+
                             <button
-                              disabled={currUser.email === user.email}
+                              disabled={currUser.email === user.email || MAIN_ADMIN_EMAILS.includes(currUser.email.toLowerCase())}
                               onClick={() => handleToggleUserSuspension(currUser.email)}
                               className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer flex items-center space-x-1 ${currUser.isSuspended ? "bg-emerald-950/40 border-emerald-900/60 text-emerald-400 hover:bg-emerald-600 hover:text-white" : "bg-red-950/40 border-red-900/60 text-red-400 hover:bg-red-600 hover:text-white disabled:opacity-30"}`}
                             >
                               <Ban className="h-3.5 w-3.5" />
                               <span>{currUser.isSuspended ? "Activate" : "Suspend"}</span>
+                            </button>
+ 
+                            <button
+                              disabled={currUser.email === user.email || MAIN_ADMIN_EMAILS.includes(currUser.email.toLowerCase())}
+                              onClick={() => handleAdminDeleteUser(currUser.email)}
+                              className="bg-red-950/30 border border-red-900/60 hover:bg-red-600 text-red-400 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1 cursor-pointer disabled:opacity-30"
+                              title="Delete user account and all their server resources"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Delete</span>
                             </button>
                           </div>
                         </td>
@@ -1202,6 +1278,94 @@ export default function AdminPanel({
                                 <Trash2 className="h-4 w-4" />
                                 <span className="text-xs">Remove</span>
                               </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: SHORTENER STATS REPORT VIEW */}
+          {activeTab === "shortener_stats" && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-md font-bold text-white uppercase tracking-wide flex items-center space-x-2">
+                      <Activity className="h-5 w-5 text-purple-500" />
+                      <span>Shortener Completions Report</span>
+                    </h3>
+                    <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                      Detailed, day-wise analytics of shortener tasks completed by users on ThunderHost.
+                    </p>
+                  </div>
+                  <button
+                    onClick={refreshAllAdminData}
+                    className="self-start sm:self-center bg-purple-650/15 border border-purple-500/35 text-purple-400 hover:bg-purple-650/30 hover:text-purple-300 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Refresh Real-time Records
+                  </button>
+                </div>
+
+                {/* Aggregated Totals Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-950/60 border border-slate-800/80 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">Days Logged</span>
+                    <span className="text-2xl font-black text-white block mt-1 font-mono">{shortenerDailyStats.length} Days</span>
+                  </div>
+                  <div className="bg-slate-950/60 border border-slate-800/80 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">Total Bypasses Completed</span>
+                    <span className="text-2xl font-black text-emerald-400 block mt-1 font-mono">
+                      {shortenerDailyStats.reduce((sum, item) => sum + (item.completionsCount || 0), 0)} Bypasses
+                    </span>
+                  </div>
+                  <div className="bg-slate-950/60 border border-slate-800/80 p-4 rounded-xl">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">Coins Distributed</span>
+                    <span className="text-2xl font-black text-yellow-400 block mt-1 font-mono">
+                      {shortenerDailyStats.reduce((sum, item) => sum + (item.totalCoinsRewarded || 0), 0).toFixed(1)} ⚡
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Day-Wise Table */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div className="p-5 border-b border-slate-800">
+                  <h3 className="text-md font-bold text-white uppercase tracking-wide">Historical Day-By-Day Audit Logs</h3>
+                </div>
+                {shortenerDailyStats.length === 0 ? (
+                  <div className="py-12 text-center text-slate-500 text-sm">
+                    No shortener completions have been submitted or tracked yet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs md:text-sm select-none">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-500 font-semibold bg-slate-950/20">
+                          <th className="p-4 uppercase text-[10px] tracking-wide">Calendar Date Report</th>
+                          <th className="p-4 uppercase text-[10px] tracking-wide">Completions Tracked</th>
+                          <th className="p-4 uppercase text-[10px] tracking-wide">Unique Claims Users</th>
+                          <th className="p-4 uppercase text-[10px] tracking-wide">Total Coins Rewarded</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shortenerDailyStats.map((stat, idx) => (
+                          <tr key={stat.date || idx} className="border-b border-slate-800/60 hover:bg-slate-950/20 transition">
+                            <td className="p-4 font-bold text-white font-mono">
+                              {stat.date}
+                            </td>
+                            <td className="p-4 font-mono text-slate-350 font-semibold text-xs">
+                              {stat.completionsCount} bypass completions
+                            </td>
+                            <td className="p-4 text-slate-400 font-semibold">
+                              {stat.uniqueUsersCount} users participating
+                            </td>
+                            <td className="p-4 font-bold text-yellow-400 font-mono">
+                              +{stat.totalCoinsRewarded?.toFixed(1) || "0.0"} ⚡
                             </td>
                           </tr>
                         ))}

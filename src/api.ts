@@ -180,6 +180,12 @@ export const api = {
     });
   },
 
+  async deleteUser(email: string) {
+    return fetchJson<{ message: string }>(`${API_BASE}/admin/users/${encodeURIComponent(email)}`, {
+      method: "DELETE"
+    });
+  },
+
   async addAdminCoins(email: string, amount: number) {
     return fetchJson<{ message: string; coins: number }>(`${API_BASE}/admin/users/${encodeURIComponent(email)}/add-coins`, {
       method: "POST",
@@ -245,6 +251,17 @@ export const api = {
   async deleteAdminShortener(id: string) {
     return fetchJson<{ message: string }>(`${API_BASE}/admin/shorteners/${id}`, {
       method: "DELETE"
+    });
+  },
+
+  async getShortenerStats() {
+    return fetchJson<any[]>(`${API_BASE}/admin/shortener-stats`);
+  },
+
+  async setUserRole(email: string, role: "admin" | "user") {
+    return fetchJson<{ message: string; user: any }>(`${API_BASE}/admin/users/${encodeURIComponent(email)}/role`, {
+      method: "POST",
+      body: JSON.stringify({ role })
     });
   }
 };
